@@ -379,6 +379,220 @@ where
         None
     }
 
+    /// Gets the first entry that matches the predicate for in-place manipulation.
+    ///
+    /// The returned [`OccupiedEntry`] in combination with [`OccupiedEntry::next`] or
+    /// [`OccupiedEntry::next_async`] can act as a mutable iterator over entries.
+    ///
+    /// It is an asynchronous method returning an `impl Future` for the caller to await.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scc::HashMap;
+    ///
+    /// let mut hashmap: HashMap<char, u32> = HashMap::default();
+    /// hashmap.insert('a', 1).await;
+    ///
+    /// let entry = hashmap.find_entry_async(|key, value| *key == 'a' && *value == 1).await;
+    /// assert!(entry.is_some());
+    /// if let Some(mut entry) = entry {
+    ///     *entry.get_mut() = 2;
+    /// }
+    /// assert_eq!(*hashmap.get(&'a').unwrap(), 2);
+    /// ```
+    pub async fn find_entry_async<F>(&self, pred: F) -> Option<OccupiedEntry<'_, K, V, H>>
+    where
+        F: Fn(&K, &V) -> bool,
+    {
+        let mut current_entry = self.first_entry_async().await;
+        while let Some(entry) = current_entry {
+            if pred(entry.key(), &entry.get()) {
+                return Some(entry);
+            }
+            current_entry = entry.next_async().await;
+        }
+        None
+    }
+
+    /// Gets the first entry that matches the predicate for in-place manipulation.
+    ///
+    /// The returned [`OccupiedEntry`] in combination with [`OccupiedEntry::next`] or
+    /// [`OccupiedEntry::next_async`] can act as a mutable iterator over entries
+    ///
+    /// It is an synchronous method returning an OccuipedEntry for the caller to manipulate.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scc::HashMap;
+    ///
+    /// let mut hashmap: HashMap<char, u32> = HashMap::default();
+    /// hashmap.insert('a', 1).await;
+    ///
+    /// let entry = hashmap.find_entry_async(|key, value| *key == 'a' && *value == 1).await;
+    /// assert!(entry.is_some());
+    /// if let Some(mut entry) = entry {
+    ///     *entry.get_mut() = 2;
+    /// }
+    /// assert_eq!(*hashmap.get(&'a').unwrap(), 2);
+    /// ```
+    pub fn find_entry<'h, F>(&'h self, pred: F) -> Option<OccupiedEntry<'h, K, V, H>>
+    where
+        F: Fn(&K, &V) -> Option<()>,
+    {
+        let mut current_entry = self.first_entry();
+        while let Some(entry) = current_entry {
+            if pred(entry.key(), &entry.get()).is_some() {
+                return Some(entry);
+            }
+            current_entry = entry.next();
+        }
+        None
+    }
+
+    ///Works same as fine it just filters
+    pub async fn filter_map_entries_async<'h, F, T>(&'h self, pred: F) -> Vec<T>
+    where
+        F: Fn(&K, &V) -> Option<T>,
+    {
+        let mut current_entry = self.first_entry_async().await;
+        let mut results = Vec::new();
+        while let Some(entry) = current_entry {
+            if let Some(result) = pred(entry.key(), &entry.get()) {
+                results.push(result);
+            }
+            current_entry = entry.next_async().await;
+        }
+        results
+    }
+
+    ///Works same as fine it just filters
+    pub fn filter_map_entries<'h, F, T>(&'h self, pred: F) -> Vec<T>
+    where
+        F: Fn(&K, &V) -> Option<T>,
+    {
+        let mut current_entry = self.first_entry();
+        let mut results = Vec::new();
+        while let Some(entry) = current_entry {
+            if let Some(result) = pred(entry.key(), &entry.get()) {
+                results.push(result);
+            }
+            current_entry = entry.next();
+        }
+        results
+    }
+
+    /// Finds the first entry that matches the predicate and returns an expected type.
+    ///
+    /// This method iterates over the entries in the `HashMap` asynchronously,
+    /// applying the predicate function to each entry. The predicate function returns
+    /// a tuple containing a boolean indicating whether the entry matches and an optional result.
+    /// If an entry matches, the function returns the result wrapped in an `Option`.
+    ///
+    /// The returned [`OccupiedEntry`] in combination with [`OccupiedEntry::next`] or
+    /// [`OccupiedEntry::next_async`] can act as a mutable iterator over entries.
+    ///
+    /// This function is especially useful for nested `HashMap`s where you need to
+    /// find and potentially manipulate nested entries based on certain conditions.
+    ///
+    /// It is an asynchronous method returning an `impl Future` for the caller to await.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scc::HashMap;
+    ///
+    /// let mut hashmap: HashMap<char, u32> = HashMap::default();
+    /// hashmap.insert('a', 1).await;
+    ///
+    /// let result: Option<u32> = hashmap.find_entry_expected(|key, value| {
+    ///     if *key == 'a' && *value == 1 {
+    ///         (true, Some(*value))
+    ///     } else {
+    ///         (false, None)
+    ///     }
+    /// }).await;
+    ///
+    /// assert_eq!(result, Some(1));
+    /// ```
+    ///
+    /// # Nested HashMap Example
+    ///
+    /// ```
+    /// use scc::HashMap;
+    /// use std::sync::Arc;
+    ///
+    /// let mut outer_map: HashMap<String, HashMap<String, Arc<RoomSupervisor>>> = HashMap::default();
+    /// let mut inner_map: HashMap<String, Arc<RoomSupervisor>> = HashMap::default();
+    /// inner_map.insert("inner_key".to_string(), Arc::new(RoomSupervisor::new())).await;
+    /// outer_map.insert("outer_key".to_string(), inner_map).await;
+    ///
+    /// let result: Option<Arc<RoomSupervisor>> = outer_map.find_entry_expected(|_, inner| {
+    ///     inner.find_entry_expected(|key, value| {
+    ///         if key == "inner_key" {
+    ///             (true, Some(value.clone()))
+    ///         } else {
+    ///             (false, None)
+    ///         }
+    ///     }).await
+    /// }).await.flatten();
+    ///
+    /// assert!(result.is_some());
+    /// ```
+    ///
+    /// # Type Parameters
+    ///
+    /// - `T`: The type to return if the predicate finds a match. This type must be derived from the key-value pairs within the `OccupiedEntry`.
+    /// - `F`: The predicate function type, which takes references to the key and value, and returns a tuple of a boolean and an optional `T`.
+    ///
+    /// # Parameters
+    ///
+    /// - `pred`: A predicate function that takes references to the key and value, and returns a tuple where the first element is a boolean indicating if the entry matches and the second element is an optional result.
+    /// Only works on `HashMap`s with keys and values that are `Clone` OR `Copy` (Arc, Rc, etc.)
+    pub async fn find_entry_map<T, F>(&self, pred: F) -> Option<T>
+    where
+        F: Fn(&K, &V) -> (bool, Option<T>),
+    {
+        let mut current_entry = self.first_entry_async().await;
+        while let Some(entry) = current_entry {
+            let key = entry.key();
+            let value = entry.get();
+            let (found, result) = pred(key, value);
+            if found {
+                return result;
+            }
+            current_entry = entry.next_async().await;
+        }
+        None
+    }
+
+    ///Doesn't need documentation self explantory
+    pub async fn values_async(&self) -> Vec<V>
+    where
+        V: Clone,
+    {
+        let mut values = Vec::new();
+        let mut current_entry = self.first_entry_async().await;
+        while let Some(entry) = current_entry {
+            values.push(entry.get().clone());
+            current_entry = entry.next_async().await;
+        }
+        values
+    }
+    /// Returns a vector of keys in the hashmap
+    pub fn values(&self) -> Vec<V>
+    where
+        V: Clone,
+    {
+        let mut values = Vec::new();
+        let mut current_entry = self.first_entry();
+        while let Some(entry) = current_entry {
+            values.push(entry.get().clone());
+            current_entry = entry.next();
+        }
+        values
+    }
     /// Inserts a key-value pair into the [`HashMap`].
     ///
     /// # Errors
@@ -881,7 +1095,6 @@ where
         })
         .await;
     }
-
     /// Searches for any entry that satisfies the given predicate.
     ///
     /// Key-value pairs that have existed since the invocation of the method are guaranteed to be
