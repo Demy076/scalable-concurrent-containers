@@ -180,6 +180,15 @@ where
     }
 }
 
+impl<K: Eq + Hash + Debug, V: Debug> FromIterator<(K, V)> for HashMap<K, V> {
+    fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
+        let hashmap = HashMap::default();
+        for (key, value) in iter {
+            hashmap.insert(key, value).unwrap();
+        }
+        hashmap
+    }
+}
 impl<K, V, H> HashMap<K, V, H>
 where
     K: Eq + Hash,
@@ -379,6 +388,23 @@ where
         None
     }
 
+    /// Gets all first entries mapped from nested maps
+    #[inline]
+    pub async fn first_entries_mapped_async<'h, F, T>(&'h self, mapper: F) -> Vec<T>
+    where
+        F: Fn(&K, &V) -> Option<T>,
+    {
+        let mut current_entry = self.first_entry_async().await;
+        let mut results = Vec::new();
+        while let Some(entry) = current_entry {
+            if let Some(result) = mapper(entry.key(), &entry.get()) {
+                results.push(result);
+            }
+            current_entry = entry.next_async().await;
+        }
+        results
+    }
+
     /// Gets the first entry that matches the predicate for in-place manipulation.
     ///
     /// The returned [`OccupiedEntry`] in combination with [`OccupiedEntry::next`] or
@@ -403,11 +429,11 @@ where
     /// ```
     pub async fn find_entry_async<F>(&self, pred: F) -> Option<OccupiedEntry<'_, K, V, H>>
     where
-        F: Fn(&K, &V) -> bool,
+        F: Fn(&K, &V) -> Option<()>,
     {
         let mut current_entry = self.first_entry_async().await;
         while let Some(entry) = current_entry {
-            if pred(entry.key(), &entry.get()) {
+            if pred(entry.key(), &entry.get()).is_some() {
                 return Some(entry);
             }
             current_entry = entry.next_async().await;
@@ -580,6 +606,35 @@ where
         }
         values
     }
+
+    /// no docs needed
+    pub async fn keys_async(&self) -> Vec<K>
+    where
+        K: Clone,
+    {
+        let mut keys = Vec::new();
+        let mut current_entry = self.first_entry_async().await;
+        while let Some(entry) = current_entry {
+            keys.push(entry.key().clone());
+            current_entry = entry.next_async().await;
+        }
+        keys
+    }
+
+    /// no docs needed
+    pub fn keys(&self) -> Vec<K>
+    where
+        K: Clone,
+    {
+        let mut keys = Vec::new();
+        let mut current_entry = self.first_entry();
+        while let Some(entry) = current_entry {
+            keys.push(entry.key().clone());
+            current_entry = entry.next();
+        }
+        keys
+    }
+
     /// Returns a vector of keys in the hashmap
     pub fn values(&self) -> Vec<V>
     where
